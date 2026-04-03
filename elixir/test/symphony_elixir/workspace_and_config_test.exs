@@ -1064,6 +1064,33 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert settings.tracker.endpoint == "https://api.github.com"
   end
 
+  test "schema parse preserves explicit github endpoint and explicit api key" do
+    assert {:ok, settings} =
+             Schema.parse(%{
+               tracker: %{
+                 kind: "github",
+                 endpoint: "https://ghe.example.com/api/v3",
+                 api_key: "ghp_explicit",
+                 project_slug: "openai/symphony"
+               }
+             })
+
+    assert settings.tracker.api_key == "ghp_explicit"
+    assert settings.tracker.endpoint == "https://ghe.example.com/api/v3"
+  end
+
+  test "schema parse keeps linear endpoint default for non-github trackers" do
+    assert {:ok, settings} =
+             Schema.parse(%{
+               tracker: %{
+                 kind: "memory",
+                 endpoint: nil
+               }
+             })
+
+    assert settings.tracker.endpoint == "https://api.linear.app/graphql"
+  end
+
   test "schema resolves sandbox policies from explicit and default workspaces" do
     explicit_policy = %{"type" => "workspaceWrite", "writableRoots" => ["/tmp/explicit"]}
 

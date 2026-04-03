@@ -9,6 +9,8 @@ defmodule SymphonyElixir.GitHub.Client do
   alias SymphonyElixir.Linear.Issue
 
   @accept_header "application/vnd.github+json"
+  @open_state_aliases MapSet.new(["todo", "in progress", "human review", "rework", "open"])
+  @closed_state_aliases MapSet.new(["done", "closed", "canceled", "cancelled", "duplicate"])
   @spec fetch_candidate_issues() :: {:ok, [Issue.t()]} | {:error, term()}
   def fetch_candidate_issues do
     tracker = Config.settings!().tracker
@@ -37,16 +39,7 @@ defmodule SymphonyElixir.GitHub.Client do
          {:ok, token} <- tracker_token(tracker.api_key) do
       issue_ids
       |> Enum.uniq()
-      |> Enum.reduce_while({:ok, []}, fn issue_id, {:ok, acc} ->
-        with {:ok, issue_number} <- parse_issue_id(issue_id),
-             {:ok, issue} <- fetch_issue(owner, repo, issue_number, token),
-             true <- is_issue_entry(issue) do
-          {:cont, {:ok, [normalize_issue(issue) | acc]}}
-        else
-          false -> {:cont, {:ok, acc}}
-          {:error, reason} -> {:halt, {:error, reason}}
-        end
-      end)
+      |> Enum.reduce_while({:ok, []}, &reduce_issue_id(&1, &2, owner, repo, token))
       |> case do
         {:ok, issues} -> {:ok, Enum.reverse(issues)}
         error -> error
@@ -81,36 +74,17 @@ defmodule SymphonyElixir.GitHub.Client do
   defp fetch_repo_issues(owner, repo, state_names, token) when is_list(state_names) do
     states = normalize_issue_states(state_names)
 
-    if states == [] do
-      {:ok, []}
-    else
-      states
-      |> Enum.reduce_while({:ok, []}, fn state, {:ok, acc} ->
-        case list_issues(owner, repo, state, token) do
-          {:ok, issues} ->
-            normalized =
-              issues
-              |> Enum.filter(&is_issue_entry/1)
-              |> Enum.map(&normalize_issue/1)
+    case states do
+      [] ->
+        {:ok, []}
 
-            {:cont, {:ok, normalized ++ acc}}
-
-          {:error, reason} ->
-            {:halt, {:error, reason}}
+      _ ->
+        states
+        |> Enum.reduce_while({:ok, []}, &reduce_state_issues(&1, &2, owner, repo, token))
+        |> case do
+          {:ok, issues} -> {:ok, issues |> Enum.reverse() |> Enum.uniq_by(& &1.id)}
+          error -> error
         end
-      end)
-      |> case do
-        {:ok, issues} ->
-          unique =
-            issues
-            |> Enum.reverse()
-            |> Enum.uniq_by(& &1.id)
-
-          {:ok, unique}
-
-        error ->
-          error
-      end
     end
   end
 
@@ -203,25 +177,44 @@ defmodule SymphonyElixir.GitHub.Client do
   end
 
   defp normalize_state_name(state_name) when is_binary(state_name) do
-    state_name
-    |> String.trim()
-    |> String.downcase()
-    |> case do
-      "todo" -> "open"
-      "in progress" -> "open"
-      "human review" -> "open"
-      "rework" -> "open"
-      "open" -> "open"
-      "done" -> "closed"
-      "closed" -> "closed"
-      "canceled" -> "closed"
-      "cancelled" -> "closed"
-      "duplicate" -> "closed"
-      _ -> nil
+    normalized = state_name |> String.trim() |> String.downcase()
+
+    cond do
+      MapSet.member?(@open_state_aliases, normalized) -> "open"
+      MapSet.member?(@closed_state_aliases, normalized) -> "closed"
+      true -> nil
     end
   end
 
   defp normalize_state_name(_), do: nil
+
+  defp fetch_normalized_issue_by_id(owner, repo, issue_id, token) do
+    with {:ok, issue_number} <- parse_issue_id(issue_id),
+         {:ok, issue} <- fetch_issue(owner, repo, issue_number, token) do
+      if issue_entry?(issue), do: {:ok, normalize_issue(issue)}, else: {:ok, nil}
+    end
+  end
+
+  defp normalize_issue_batch(issues) do
+    issues
+    |> Enum.filter(&issue_entry?/1)
+    |> Enum.map(&normalize_issue/1)
+  end
+
+  defp reduce_issue_id(issue_id, {:ok, acc}, owner, repo, token) do
+    case fetch_normalized_issue_by_id(owner, repo, issue_id, token) do
+      {:ok, nil} -> {:cont, {:ok, acc}}
+      {:ok, normalized_issue} -> {:cont, {:ok, [normalized_issue | acc]}}
+      {:error, reason} -> {:halt, {:error, reason}}
+    end
+  end
+
+  defp reduce_state_issues(state, {:ok, acc}, owner, repo, token) do
+    case list_issues(owner, repo, state, token) do
+      {:ok, issues} -> {:cont, {:ok, normalize_issue_batch(issues) ++ acc}}
+      {:error, reason} -> {:halt, {:error, reason}}
+    end
+  end
 
   defp normalize_issue(issue) when is_map(issue) do
     number = Map.get(issue, "number")
@@ -254,9 +247,9 @@ defmodule SymphonyElixir.GitHub.Client do
 
   defp normalize_labels(_labels), do: []
 
-  defp is_issue_entry(%{"pull_request" => %{} = _pr}), do: false
-  defp is_issue_entry(%{}), do: true
-  defp is_issue_entry(_), do: false
+  defp issue_entry?(%{"pull_request" => %{} = _pr}), do: false
+  defp issue_entry?(%{}), do: true
+  defp issue_entry?(_), do: false
 
   defp parse_datetime(value) when is_binary(value) do
     case DateTime.from_iso8601(value) do

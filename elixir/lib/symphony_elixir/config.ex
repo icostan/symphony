@@ -115,29 +115,35 @@ defmodule SymphonyElixir.Config do
   end
 
   defp validate_semantics(settings) do
-    cond do
-      is_nil(settings.tracker.kind) ->
-        {:error, :missing_tracker_kind}
-
-      settings.tracker.kind not in ["linear", "memory", "github"] ->
-        {:error, {:unsupported_tracker_kind, settings.tracker.kind}}
-
-      settings.tracker.kind == "linear" and not is_binary(settings.tracker.api_key) ->
-        {:error, :missing_linear_api_token}
-
-      settings.tracker.kind == "linear" and not is_binary(settings.tracker.project_slug) ->
-        {:error, :missing_linear_project_slug}
-
-      settings.tracker.kind == "github" and not is_binary(settings.tracker.api_key) ->
-        {:error, :missing_github_api_token}
-
-      settings.tracker.kind == "github" and not is_binary(settings.tracker.project_slug) ->
-        {:error, :missing_github_project_slug}
-
-      true ->
-        :ok
+    case validate_tracker_kind(settings.tracker.kind) do
+      :ok -> validate_tracker_requirements(settings.tracker)
+      error -> error
     end
   end
+
+  defp validate_tracker_kind(nil), do: {:error, :missing_tracker_kind}
+
+  defp validate_tracker_kind(kind) when kind in ["linear", "memory", "github"], do: :ok
+
+  defp validate_tracker_kind(kind), do: {:error, {:unsupported_tracker_kind, kind}}
+
+  defp validate_tracker_requirements(%{kind: "linear", api_key: api_key, project_slug: project_slug}) do
+    cond do
+      not is_binary(api_key) -> {:error, :missing_linear_api_token}
+      not is_binary(project_slug) -> {:error, :missing_linear_project_slug}
+      true -> :ok
+    end
+  end
+
+  defp validate_tracker_requirements(%{kind: "github", api_key: api_key, project_slug: project_slug}) do
+    cond do
+      not is_binary(api_key) -> {:error, :missing_github_api_token}
+      not is_binary(project_slug) -> {:error, :missing_github_project_slug}
+      true -> :ok
+    end
+  end
+
+  defp validate_tracker_requirements(_tracker), do: :ok
 
   defp format_config_error(reason) do
     case reason do
