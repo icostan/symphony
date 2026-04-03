@@ -149,6 +149,39 @@ defmodule SymphonyElixir.CoreTest do
     assert Config.settings!().tracker.assignee == env_assignee
   end
 
+  test "github personal access token resolves from GITHUB_PERSONAL_ACCESS_TOKEN env var" do
+    previous_github_token = System.get_env("GITHUB_PERSONAL_ACCESS_TOKEN")
+    env_token = "test-github-pat"
+
+    on_exit(fn -> restore_env("GITHUB_PERSONAL_ACCESS_TOKEN", previous_github_token) end)
+    System.put_env("GITHUB_PERSONAL_ACCESS_TOKEN", env_token)
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "github",
+      tracker_api_token: nil,
+      tracker_project_slug: "openai/symphony",
+      codex_command: "/bin/sh app-server"
+    )
+
+    assert Config.settings!().tracker.api_key == env_token
+    assert Config.settings!().tracker.endpoint == "https://api.github.com"
+    assert :ok = Config.validate!()
+  end
+
+  test "tracker selects github adapter when tracker.kind is github" do
+    previous_github_token = System.get_env("GITHUB_PERSONAL_ACCESS_TOKEN")
+    on_exit(fn -> restore_env("GITHUB_PERSONAL_ACCESS_TOKEN", previous_github_token) end)
+    System.put_env("GITHUB_PERSONAL_ACCESS_TOKEN", "test-github-pat")
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "github",
+      tracker_api_token: nil,
+      tracker_project_slug: "openai/symphony"
+    )
+
+    assert Tracker.adapter() == SymphonyElixir.GitHub.Adapter
+  end
+
   test "workflow file path defaults to WORKFLOW.md in the current working directory when app env is unset" do
     original_workflow_path = Workflow.workflow_file_path()
 
