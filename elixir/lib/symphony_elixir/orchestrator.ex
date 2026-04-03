@@ -237,6 +237,14 @@ defmodule SymphonyElixir.Orchestrator do
         Logger.error("Linear project slug missing in WORKFLOW.md")
         state
 
+      {:error, :missing_github_api_token} ->
+        Logger.error("GitHub personal access token missing in WORKFLOW.md or GITHUB_PERSONAL_ACCESS_TOKEN")
+        state
+
+      {:error, :missing_github_project_slug} ->
+        Logger.error("GitHub project slug missing in WORKFLOW.md (expected owner/repo)")
+        state
+
       {:error, :missing_tracker_kind} ->
         Logger.error("Tracker kind missing in WORKFLOW.md")
 

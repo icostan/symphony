@@ -6,6 +6,8 @@ defmodule SymphonyElixir.Config.Schema do
   import Ecto.Changeset
 
   alias SymphonyElixir.PathSafety
+  @linear_default_endpoint "https://api.linear.app/graphql"
+  @github_default_endpoint "https://api.github.com"
 
   @primary_key false
 
@@ -43,10 +45,11 @@ defmodule SymphonyElixir.Config.Schema do
     import Ecto.Changeset
 
     @primary_key false
+    @default_linear_endpoint "https://api.linear.app/graphql"
 
     embedded_schema do
       field(:kind, :string)
-      field(:endpoint, :string, default: "https://api.linear.app/graphql")
+      field(:endpoint, :string, default: @default_linear_endpoint)
       field(:api_key, :string)
       field(:project_slug, :string)
       field(:assignee, :string)
@@ -366,9 +369,13 @@ defmodule SymphonyElixir.Config.Schema do
   end
 
   defp finalize_settings(settings) do
+    tracker_kind = settings.tracker.kind
+    api_key_fallback = tracker_api_key_fallback(tracker_kind)
+
     tracker = %{
       settings.tracker
-      | api_key: resolve_secret_setting(settings.tracker.api_key, System.get_env("LINEAR_API_KEY")),
+      | endpoint: normalize_tracker_endpoint(settings.tracker.endpoint, tracker_kind),
+        api_key: resolve_secret_setting(settings.tracker.api_key, api_key_fallback),
         assignee: resolve_secret_setting(settings.tracker.assignee, System.get_env("LINEAR_ASSIGNEE"))
     }
 
@@ -385,6 +392,23 @@ defmodule SymphonyElixir.Config.Schema do
 
     %{settings | tracker: tracker, workspace: workspace, codex: codex}
   end
+
+  defp tracker_api_key_fallback("github"), do: System.get_env("GITHUB_PERSONAL_ACCESS_TOKEN")
+  defp tracker_api_key_fallback(_), do: System.get_env("LINEAR_API_KEY")
+
+  defp normalize_tracker_endpoint(endpoint, "github")
+       when endpoint in [nil, "", @linear_default_endpoint] do
+    @github_default_endpoint
+  end
+
+  defp normalize_tracker_endpoint(endpoint, "linear")
+       when endpoint in [nil, ""] do
+    @linear_default_endpoint
+  end
+
+  defp normalize_tracker_endpoint(endpoint, _kind) when is_binary(endpoint), do: endpoint
+  defp normalize_tracker_endpoint(_endpoint, "github"), do: @github_default_endpoint
+  defp normalize_tracker_endpoint(_endpoint, _kind), do: @linear_default_endpoint
 
   defp normalize_keys(value) when is_map(value) do
     Enum.reduce(value, %{}, fn {key, raw_value}, normalized ->
